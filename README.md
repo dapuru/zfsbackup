@@ -1,4 +1,4 @@
-# pzfsbackup
+# zfsbackup
 
 As described in <a href="https://blog.daniel-purucker.com/data-backup-strategy-for-zfs-pool-on-truenas/">this post post</a>, i modified the awesome script from <a href="https://esc-now.de/_/zfs-offsite-backup-auf-eine-externe-festplatte/?lang=en">Jörg Binnewald @ https://esc-now.de/</a> to suit my needs.
 
