@@ -6,5 +6,6 @@ The script is automatically triggered, when the backup-HDD is attached to the Tr
 
 ## content
 - truenas.poolbackup.sh (Backup script, triggert by devd rule)
+- Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
 - devd-backuphdd.conf (devd rule, connecting HDD)
 - truenas-copy-devdconf.sh (Workaround, because TrueNas keeps killing the devd rule)
