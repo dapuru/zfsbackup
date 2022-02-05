@@ -16,9 +16,9 @@
 # configuration in: devd-backuphdd.conf
 # see: https://www.freebsd.org/cgi/man.cgi?devd.conf
 #
-# Version: 0.5.5
-# Date: 04.03.2021
-# Published: 05.06.2021
+# Version: 0.5.6
+# Date: 05.02.2022
+# Initially Published: 05.06.2021
 #
 # Modifications:
 # Support for encrypted Backup-Pool using load-key
@@ -26,32 +26,17 @@
 # Scrub for Backup-Pool
 # Email-Notification
 # Cleansing #here
+# .env-file for config
 #
 # #####################################################################
 # ####################### Config## ####################################
 
-# Pool to be saved
-MASTERPOOL="Data"
+# Get all config from file conf-truenas-poolbackup.env in same directory
+# Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
 
-# Backup-Pool (on HD)
-# Bsp. für Test: Ext-Test
-BACKUPPOOL="Ext-Backup"
-BACKUPKEY="/root/scripts/keys/Ext-Backup-key.key"
-TIMESTAMP=`date +"%Y-%m-%d_%H-%M-%S"`
-BACKUPLOG="/root/scripts/logs/$TIMESTAMP-backup.log"
-
-# Datasets, which should be included in the Backup (Child dataset are added automatically)
-# Bsp for Test: MAINDATASETS=("test-perm" "archive") #here
-MAINDATASETS=("test-perm" "archive")
-
-# Number of snapshots to be kept, at least 1 !!!
-KEEPOLD=2
-
-# Prefix for Snapshot-Name
-PREFIX="back-script" # Backup-Script
-
-# Email for notifications
-email="email-adress" # receiver #here
+set -o allexport
+source truenas-poolbackup-conf.env
+set +o allexport
 
 # ######################################################################
 # ####################### Variables ####################################
