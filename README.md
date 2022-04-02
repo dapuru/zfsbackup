@@ -4,8 +4,15 @@ As described in <a href="https://blog.daniel-purucker.com/data-backup-strategy-f
 
 The script is automatically triggered, when the backup-HDD is attached to the TrueNAS-Server. The Datasets (and child-Datasets) are incrementally backed-up via send/receive (ZFS feature).
 
-## content
+## Content
 - truenas.poolbackup.sh (Backup script, triggert by devd rule)
 - Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
 - devd-backuphdd.conf (devd rule, connecting HDD)
 - truenas-copy-devdconf.sh (Workaround, because TrueNas keeps killing the devd rule)
+
+## Usage
+- configure the devd-rule, and change the config in truenas-poolbackup-conf.env to suit your needs
+- you may run the script manually, there are parmeters available:
+  - -h show help
+  - -f force scrub (even if the condition, number of passed days) is not met
+  - -d dry run (do not do the actual backup)
