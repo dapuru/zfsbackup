@@ -3,6 +3,7 @@
 # Backup of TrueNas Pools to external HardDisk
 # This will backup the DATA in TrueNAS
 #
+# Author: dapuru (https://github.com/dapuru/zfsbackup/)
 # based on the script by Jörg Binnewald
 # initial Source: https://esc-now.de/_/zfs-offsite-backup-auf-eine-externe-festplatte/?lang=en
 # License: https://creativecommons.org/licenses/by-nc-sa/4.0/
@@ -16,8 +17,8 @@
 # configuration in: devd-backuphdd.conf
 # see: https://www.freebsd.org/cgi/man.cgi?devd.conf
 #
-# Version: 0.5.6
-# Date: 05.02.2022
+# Version: 0.6
+# Date: 02.04.2022
 # Initially Published: 05.06.2021
 #
 # Modifications:
@@ -27,16 +28,42 @@
 # Email-Notification
 # Cleansing #here
 # .env-file for config
+# Regex for Scrub-Date & Command line parameter for Dry-run (-d) and forced scrub (-f)
 #
 # #####################################################################
 # ####################### Config## ####################################
 
 # Get all config from file conf-truenas-poolbackup.env in same directory
 # Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
-
 set -o allexport
 source truenas-poolbackup-conf.env
 set +o allexport
+
+
+# --------------- Check command line parameter --------------
+
+dry_run=0
+force_scrub=0
+
+while getopts "hdfm:" opt; do
+	case $opt in
+		d)	dry_run=1
+		;;
+		f)	force_scrub=1
+		;;		
+		h) echo "run poolbackup using zfs. Config file in truenas-poolbackup-conf.env"
+	 	  	echo 'usage: truenas-poolbackup [-dfh]'
+	    	echo "Options: -d dryrun (no backup done)"
+	    	echo "         -f force scrub (even condition is not met)"
+	 		echo "         -h print this help and exit"
+			exit 0 ;;
+	esac
+done
+
+# --------------- wait to be able to kill process  --------------
+echo "Sleeping for 60 sec. - so you can kill me"
+sleep 60
+echo "Starting..."
 
 # ######################################################################
 # ####################### Variables ####################################
@@ -81,6 +108,10 @@ done
 
 
 # Logfile
+if [ $dry_run -eq 1 ]; then
+ echo "########## DRYRUN##########" >> ${BACKUPLOG}
+ echo "########## DRYRUN##########"
+fi
  echo "########## Backup of pools on server ${freenashost} ##########" >> ${BACKUPLOG}
  echo "Started Backup-job: $TIMESTAMP" >> ${BACKUPLOG}
 
@@ -126,6 +157,8 @@ KEEPOLD=$(($KEEPOLD + 1))
 # Only contiune if pool are in good shape
 if [ ${problems} -eq 0 ]; then
 
+# No backup in Dryrun
+if [ $dry_run -eq 0 ]; then
 for DATASET in ${DATASETS[@]}
 do
     # Logging
@@ -207,9 +240,10 @@ do
 	zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep "${MASTERPOOL}/${DATASET}@${PREFIX}-" | tail -r | tail +$KEEPOLD | xargs -n 1 zfs destroy #-r
  
 done
+fi # not in dry-run
 
 # #################################################################
-# ####################### Cleanup  ################################
+# ####################### Scrub  ################################
 
 echo "" >> ${BACKUPLOG}
 echo "****************** $BACKUPPOOL - Cleanup ******************" >> ${BACKUPLOG}
@@ -218,25 +252,58 @@ echo "****************** $BACKUPPOOL - Cleanup ******************" >> ${BACKUPLO
 # https://pthree.org/2012/12/11/zfs-administration-part-vi-scrub-and-resilver/
 # from https://gist.github.com/petervanderdoes/bd6660302404ed5b094d
 
-scrubRawDate=$(zpool status $BACKUPPOOL | grep scrub | awk '{print $15 $12 $13}')
+# assuming external HD and long scrub-time more than one day
+scrubRawDate=$(zpool status $BACKUPPOOL | grep "scan:" | grep "scrub" | rev | cut -f1-5 -d ' ' | rev | awk '{print $4 $1 $2}')
+echo $scrubRawDate
 
 re='^[0-9]+[A-Z]{1}[a-z]{1,3}[0-9]{1,2}$' # check format like 2021Feb7
-if ! [[ $scrubRawDate =~ $re ]] ; then
-   echo "ERROR: Scrub raw date $scrubRawDate is formatted wrong." >> ${BACKUPLOG} 
-else
+if (echo "$scrubRawDate" | grep -Eq "$re"); then
 	scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
 	scrubDiff=$(($currentDate-$scrubDate))
 	scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
+	# echo $scrubShow
+else
+   echo "Wrong Date - Assuming shorter scrub-time"
+   scrubRawDate=$(echo "$ZPOOLSTATUS" | grep "scan:" | grep "scrub" | rev | cut -f1-4 -d ' ' | rev | awk '{print $4 $1 $2}')
+	echo $scrubRawDate
 
-	# https://stackoverflow.com/questions/8941874/bad-number-on-the-bash-script
-	if [ "0$(echo $scrubDiff|tr -d ' ')" -gt "0$(echo $scrubExpire|tr -d ' ')" ]; then
-		echo "Last Scrub for $BACKUPPOOL was on $scrubRawDate (beyond $scrubExpireShow days-limit) - SCRUB needed..." >> ${BACKUPLOG}
-	else
-		echo "Last Scrub for $BACKUPPOOL was on $scrubDate ($scrubShow days / $scrubExpireShow) - NO scrub needed..." >> ${BACKUPLOG}
+	if (echo "$scrubRawDate" | grep -Eq "$re"); then
+        scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
+        scrubDiff=$(($currentDate-$scrubDate))
+        scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
+   else
+		echo "ERROR: Scrub raw date $scrubRawDate is formatted wrong. Try running manual scrub first." >> ${BACKUPLOG} 
 	fi
 fi
 
+# do the real scrub
+	# https://stackoverflow.com/questions/8941874/bad-number-on-the-bash-script
+	if [ "0$(echo $scrubDiff|tr -d ' ')" -gt "0$(echo $scrubExpire|tr -d ' ')" ] || [ $force_scrub -eq 1 ]; then
+		echo "Last Scrub for $BACKUPPOOL was on $scrubRawDate (beyond $scrubExpireShow days-limit) - SCRUB needed..." >> ${BACKUPLOG}
+		TIMESTAMP=`date +"%Y-%m-%d_%H-%M-%S"`
+		echo "scrub started: $TIMESTAMP"
+		echo "scrub started: $TIMESTAMP" >> ${BACKUPLOG}
+		
+		zpool scrub $BACKUPPOOL
+		# wait until scrub is finished
+		while zpool status $BACKUPPOOL | grep 'scan:  *scrub in progress' > /dev/null; do
+			echo -n '.'
+			sleep 10
+		done
+		TIMESTAMP=`date +"%Y-%m-%d_%H-%M-%S"`
+		echo "scrub finished: $TIMESTAMP"
+		echo "scrub finished: $TIMESTAMP" >> ${BACKUPLOG}
+		
+	else
+		echo "No Scrub needed"
+		echo "Last Scrub for $BACKUPPOOL was on $scrubDate ($scrubShow days / $scrubExpireShow) - NO scrub needed..." >> ${BACKUPLOG}
+	fi
+
+# #################################################################
+# ####################### End ################################
+
 # Unmount Backup Pool
+echo "Unmount $BACKUPPOOL"
 zpool export $BACKUPPOOL >> ${BACKUPLOG}
 
 # Write Log
@@ -245,7 +312,7 @@ echo "Finished Backup-job: $TIMESTAMP" >> ${BACKUPLOG}
 
 else # Pools are not in good shape
 	subject="TrueNas - CRITICAL Backup to $BACKUPPOOL $TIMESTAMP"
-	"########## ERROR - ERROR - ERROR -- Pools are not in good shape ########"  >> ${BACKUPLOG}
+	echo "########## ERROR - ERROR - ERROR -- Pools are not in good shape ########"  >> ${BACKUPLOG}
 fi # Only contiune if pool are in good shape
 
 
