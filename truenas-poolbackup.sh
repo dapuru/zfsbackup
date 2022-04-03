@@ -17,8 +17,8 @@
 # configuration in: devd-backuphdd.conf
 # see: https://www.freebsd.org/cgi/man.cgi?devd.conf
 #
-# Version: 0.6
-# Date: 02.04.2022
+# Version: 0.6.1
+# Date: 03.04.2022
 # Initially Published: 05.06.2021
 #
 # Modifications:
@@ -242,8 +242,9 @@ do
 done
 fi # not in dry-run
 
-# #################################################################
-# ####################### Scrub  ################################
+# #########################################################
+# ####################### Scrub  #############################
+# Be aware: Scrub run may take some time, up to days... so chosse the scrub-limit carefully... #
 
 echo "" >> ${BACKUPLOG}
 echo "****************** $BACKUPPOOL - Cleanup ******************" >> ${BACKUPLOG}
@@ -279,7 +280,11 @@ fi
 # do the real scrub
 	# https://stackoverflow.com/questions/8941874/bad-number-on-the-bash-script
 	if [ "0$(echo $scrubDiff|tr -d ' ')" -gt "0$(echo $scrubExpire|tr -d ' ')" ] || [ $force_scrub -eq 1 ]; then
-		echo "Last Scrub for $BACKUPPOOL was on $scrubRawDate (beyond $scrubExpireShow days-limit) - SCRUB needed..." >> ${BACKUPLOG}
+		if [ $force_scrub -eq 1 ]; then
+			echo "Last Scrub for $BACKUPPOOL was on $scrubRawDate ($scrubShow days ago) forced-Flag - SCRUB forced..." >> ${BACKUPLOG}
+		else
+			echo "Last Scrub for $BACKUPPOOL was on $scrubRawDate ($scrubShow days ago, beyond $scrubExpireShow days-limit) - SCRUB needed..." >> ${BACKUPLOG}
+		fi
 		TIMESTAMP=`date +"%Y-%m-%d_%H-%M-%S"`
 		echo "scrub started: $TIMESTAMP"
 		echo "scrub started: $TIMESTAMP" >> ${BACKUPLOG}
@@ -296,7 +301,7 @@ fi
 		
 	else
 		echo "No Scrub needed"
-		echo "Last Scrub for $BACKUPPOOL was on $scrubDate ($scrubShow days / $scrubExpireShow) - NO scrub needed..." >> ${BACKUPLOG}
+		echo "Last Scrub for $BACKUPPOOL was on $scrubDate ($scrubShow days ago, below $scrubExpireShow days-limit) - NO scrub needed..." >> ${BACKUPLOG}
 	fi
 
 # #################################################################
