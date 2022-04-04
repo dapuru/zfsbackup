@@ -12,7 +12,7 @@ The script is automatically triggered, when the backup-HDD is attached to the Tr
 
 ## Usage
 - configure the devd-rule, and change the config in truenas-poolbackup-conf.env to suit your needs
-- you may run the script manually, there are parmeters available:
+- you may run the script manually, there are parameters available:
   - -h show help
   - -f force scrub (even if the condition, number of passed days) is not met
   - -d dry run (do not do the actual backup)
