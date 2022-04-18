@@ -144,8 +144,11 @@ done
 # Import Backup-Pool
 zpool import $BACKUPPOOL
 
-# Unlock Pool
-zfs load-key -r $BACKUPPOOL < $BACKUPKEY
+# Unlock Pool (if Keyfile is provideds)
+if [ ! -z $BACKUPKEY ];
+	then
+		zfs load-key -r $BACKUPPOOL < $BACKUPKEY
+fi
 
 # Log Status pf Backup-Pool
 zpool status $BACKUPPOOL >> ${BACKUPLOG}
