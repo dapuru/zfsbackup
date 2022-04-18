@@ -61,8 +61,13 @@ while getopts "hdfm:" opt; do
 done
 
 # --------------- wait to be able to kill process  --------------
-echo "Sleeping for 60 sec. - so you can kill me"
-sleep 60
+secs=0
+while [ ! 60 -eq $secs ]; do
+    sleep 1
+    ((secs=secs+1))
+	echo -ne "Sleeping for 60 sec. - so you can kill me ($secs) "\\r
+done
+echo
 echo "Starting..."
 
 # ######################################################################
@@ -109,8 +114,8 @@ done
 
 # Logfile
 if [ $dry_run -eq 1 ]; then
- echo "########## DRYRUN##########" >> ${BACKUPLOG}
- echo "########## DRYRUN##########"
+ echo "########## DRYRUN ##########" >> ${BACKUPLOG}
+ echo "########## DRYRUN ##########"
 fi
  echo "########## Backup of pools on server ${freenashost} ##########" >> ${BACKUPLOG}
  echo "Started Backup-job: $TIMESTAMP" >> ${BACKUPLOG}
@@ -146,7 +151,8 @@ zfs load-key -r $BACKUPPOOL < $BACKUPKEY
 zpool status $BACKUPPOOL >> ${BACKUPLOG}
 
 # Check if one of the pools has problems
-condition=$(zpool status | egrep -i '(DEGRADED|FAULTED|OFFLINE|UNAVAIL|REMOVED|FAIL|DESTROYED|corrupt|cannot|unrecover)')
+#condition=$(zpool status | egrep -i '(DEGRADED|FAULTED|OFFLINE|UNAVAIL|REMOVED|FAIL|DESTROYED|corrupt|cannot|unrecover)') # https://github.com/dapuru/zfsbackup/issues/5
+condition=$(zpool status | egrep -i '(DEGRADED|FAULTED|OFFLINE|UNAVAIL|REMOVED|FAIL|DESTROYED|corrupt|cannot|unrecover)' | grep -v "features are unavailable")
 if [ "${condition}" ]; then
   problems=1
   subject="TrueNas - ERR Backup to $BACKUPPOOL $TIMESTAMP"
@@ -176,7 +182,7 @@ do
 	if [ -z "$recentBSnap" ] 
 		then
 			echo "ERROR - No snapshot found..." >> ${BACKUPLOG}
-			dialog --title "No snapshot found" --yesno "There is no backup-snapshot in ${BACKUPPOOL}/${DATASET}. Should a new backup be created? (Existing data in ${BACKUPPOOL}/${DATASET} wwill be overwritten.)" 15 60
+			dialog --title "No snapshot found" --yesno "There is no backup-snapshot in ${BACKUPPOOL}/${DATASET}. Should a new backup be created? (Existing data in ${BACKUPPOOL}/${DATASET} will be overwritten.)" 15 60
 			ANTWORT=${?}
 			if [ "$ANTWORT" -eq "0" ]
 				then
