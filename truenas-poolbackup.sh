@@ -146,8 +146,7 @@ do
 done
 
 
-# Import Backup-
-Pool
+# Import Backup-Pool
 zpool import $BACKUPPOOL
 
 # Unlock Pool (if Keyfile is provideds)
