@@ -44,18 +44,23 @@ set +o allexport
 
 dry_run=0
 force_scrub=0
+yes_all=0
 
 while getopts "hdfm:" opt; do
 	case $opt in
 		d)	dry_run=1
 		;;
 		f)	force_scrub=1
-		;;		
+		;;
+		y)	yes_all=1
+		;;
 		h) echo "run poolbackup using zfs. Config file in truenas-poolbackup-conf.env"
-	 	  	echo 'usage: truenas-poolbackup [-dfh]'
+	 	  	echo 'usage: truenas-poolbackup [-dfhy]'
 	    	echo "Options: -d dryrun (no backup done)"
 	    	echo "         -f force scrub (even condition is not met)"
 	 		echo "         -h print this help and exit"
+	 		echo "         -y don't ask when creating/overwriting folders in backup"
+			echo "            (caution: intended to be used on initial backups)"
 			exit 0 ;;
 	esac
 done
@@ -141,7 +146,8 @@ do
 done
 
 
-# Import Backup-Pool
+# Import Backup-
+Pool
 zpool import $BACKUPPOOL
 
 # Unlock Pool (if Keyfile is provideds)
@@ -185,8 +191,13 @@ do
 	if [ -z "$recentBSnap" ] 
 		then
 			echo "ERROR - No snapshot found..." >> ${BACKUPLOG}
-			dialog --title "No snapshot found" --yesno "There is no backup-snapshot in ${BACKUPPOOL}/${DATASET}. Should a new backup be created? (Existing data in ${BACKUPPOOL}/${DATASET} will be overwritten.)" 15 60
-			ANTWORT=${?}
+			if [ ! $yes_all -eq 1 ];
+				then
+					dialog --title "No snapshot found" --yesno "There is no backup-snapshot in ${BACKUPPOOL}/${DATASET}. Should a new backup be created? (Existing data in ${BACKUPPOOL}/${DATASET} will be overwritten.)" 15 60
+					ANTWORT=${?}
+			else
+				ANTWORT="0"
+			fi
 			if [ "$ANTWORT" -eq "0" ]
 				then
 					# Initialize Backup
