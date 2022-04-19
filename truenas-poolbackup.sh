@@ -35,10 +35,15 @@
 
 # Get all config from file conf-truenas-poolbackup.env in same directory
 # Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
+SCRIPT_PATH="`dirname \"$0\"`"
+SCRIPT_PATH="`( cd \"$SCRIPT_PATH\" && pwd )`"
+
 set -o allexport
-source truenas-poolbackup-conf.env
+source ${SCRIPT_PATH}/truenas-poolbackup-conf.env
 set +o allexport
 
+# Exit on Error
+set -e
 
 # --------------- Check command line parameter --------------
 
@@ -91,6 +96,40 @@ subject="TrueNas - SUCC Backup to $BACKUPPOOL $TIMESTAMP"
 
 # human readable
 scrubExpireShow=$(($scrubExpire / 60 / 60 / 24)) # in days
+
+# --------------------- Email function ---------------------
+function prepareMailContent(){
+	mailSubject="$1"
+	mailBody="$2"
+	printf "%s\n" "To: ${email}
+Subject: ${mailSubject}
+Mime-Version: 1.0
+Content-Type: multipart/mixed; boundary=\"$boundary\"
+--${boundary}
+Content-Type: text/html; charset=\"US-ASCII\"
+Content-Transfer-Encoding: 7bit
+Content-Disposition: inline
+<html><head></head><body><pre style=\"font-size:14px; white-space:pre\">" >> $mailfile
+
+	if [ -f "${mailBody}" ];
+		then
+		less ${BACKUPLOG} >> $mailfile
+	else
+		echo "${mailBody}" >> $mailfile
+	fi
+
+	printf "%s\n" "</pre></body></html>
+--${boundary}--" >> $mailfile
+}
+
+
+# --------------------- Notification email ---------------------
+if [ $notification_onstart -eq 1 ];
+	then
+		prepareMailContent "TrueNas - START Backup to $BACKUPPOOL $TIMESTAMP" "Start notification of backup script $0"
+		sendmail -t -oi < ${mailfile}
+		rm ${mailfile} # important, otherwiese emails are sent all over again
+fi
 
 # ########################################################################
 # ####################### LOGIC starts here ##############################
@@ -159,12 +198,13 @@ fi
 zpool status $BACKUPPOOL >> ${BACKUPLOG}
 
 # Check if one of the pools has problems
-#condition=$(zpool status | egrep -i '(DEGRADED|FAULTED|OFFLINE|UNAVAIL|REMOVED|FAIL|DESTROYED|corrupt|cannot|unrecover)') # https://github.com/dapuru/zfsbackup/issues/5
+set +e
 condition=$(zpool status | egrep -i '(DEGRADED|FAULTED|OFFLINE|UNAVAIL|REMOVED|FAIL|DESTROYED|corrupt|cannot|unrecover)' | grep -v "features are unavailable")
 if [ "${condition}" ]; then
   problems=1
   subject="TrueNas - ERR Backup to $BACKUPPOOL $TIMESTAMP"
 fi
+set -e
 
 KEEPOLD=$(($KEEPOLD + 1))
 
@@ -343,25 +383,11 @@ fi # Only contiune if pool are in good shape
 # ##################################################################
 # ####################### Send Email  ##############################
 
-printf "%s\n" "To: ${email}
-Subject: ${subject}
-Mime-Version: 1.0
-Content-Type: multipart/mixed; boundary=\"$boundary\"
---${boundary}
-Content-Type: text/html; charset=\"US-ASCII\"
-Content-Transfer-Encoding: 7bit
-Content-Disposition: inline
-<html><head></head><body><pre style=\"font-size:14px; white-space:pre\">" >> $mailfile
-
-less ${BACKUPLOG} >> $mailfile
-
-printf "%s\n" "</pre></body></html>
---${boundary}--" >> $mailfile
-
 ### Send report ###
 if [ -z "${email}" ]; then
-  echo "No email address specified, information available in ${mailfile}"
-else
-  sendmail -t -oi < ${mailfile}
-  rm ${mailfile} # important, otherwiese emails are sent all over again
+	echo "No email address specified, information available in ${mailfile}"
+elif [ $notification_onend -eq 1 ]; then
+	prepareMailContent "${subject}" ${BACKUPLOG}
+	sendmail -t -oi < ${mailfile}
+	rm ${mailfile} # important, otherwiese emails are sent all over again
 fi
