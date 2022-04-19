@@ -226,7 +226,7 @@ do
     # -o name = Display dataset name
     # Snapshot name: ${BACKUPPOOL}/${DATASET}
     
-	recentBSnap=$(zfs list -rt snap -H -o name "${BACKUPPOOL}/${DATASET}" | grep "@${PREFIX}-" | tail -1 | cut -d@ -f2)
+	recentBSnap=$(zfs list -rt snap -H -o name "${BACKUPPOOL}/${DATASET}" | grep "${DATASET}@${PREFIX}-" | tail -1 | cut -d@ -f2)
 	if [ -z "$recentBSnap" ] 
 		then
 			echo "ERROR - No snapshot found..." >> ${BACKUPLOG}
@@ -261,10 +261,12 @@ do
 	fi
 	
 	# Check if corresponding snapshot does exist in Master-Pool
-	origBSnap=$(zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep $recentBSnap | cut -d@ -f2)
+	origBSnap=$(zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep "${DATASET}@${recentBSnap}" | cut -d@ -f2)
 	if [ "$recentBSnap" != "$origBSnap" ]
 		then
+			#TODO: Do sth. against it ! (Pick another Snap, create an intermediate one, ask user ...) - Issue #10
 			echo "Error: For the last backup snaphot ${recentBSnap} there is no corresponding snapshot in the master-pool." >> ${BACKUPLOG}
+			echo "Error: $recentBSnap != $origBSnap" >> ${BACKUPLOG}
 			subject="TrueNas - ERR Backup to $BACKUPPOOL $TIMESTAMP"
 			continue
 	fi
@@ -278,13 +280,13 @@ do
 	echo "new snapshot created: ${NEWSNAP}" >> ${BACKUPLOG}
 	
 	# send new snapshot
-	# zfs send: Creates a stream representation of the	last snapshot argument
+	# zfs send: Creates a stream representation of the last snapshot argument
 	# -v = verbose
 	# -i = incremental (The incremental source must be an earlier snapshot in	the destination's history.  It
 	#			will commonly be an earlier snapshot in the destination's filesystem
 	# -F force, needed when target has been modified, this could even be the case, when just accessing the files in the Backup-Pool (atime)
 	#			see: https://www.kernel-error.de/kernel-error-blog/372-zfs-send-recv-schlaegt-mit-cannot-receive-incremental-stream-destination-has-been-modified-fehl
-	zfs send -v -i $recentBSnap $NEWSNAP | zfs recv -F "${BACKUPPOOL}/${DATASET}" >> ${BACKUPLOG}
+	zfs send -v -i @$recentBSnap $NEWSNAP | zfs recv -F "${BACKUPPOOL}/${DATASET}" >> ${BACKUPLOG}
 	echo "Send: $NEWSNAP to ${BACKUPPOOL}/${DATASET}" >> ${BACKUPLOG}
 	
 	# delete old snapshots
