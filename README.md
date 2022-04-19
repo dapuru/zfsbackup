@@ -12,8 +12,10 @@ The script is automatically triggered, when the backup-HDD is attached to the Tr
 
 ## Usage
 - configure the devd-rule, and change the config in truenas-poolbackup-conf.env to suit your needs
+- place the script on a safe place in your datapool (as the system partition is not upgrade safe)
 - you may run the script manually, there are parameters available:
   - -h show help
   - -f force scrub (even if the condition, number of passed days) is not met
   - -d dry run (do not do the actual backup)
   - -y don't ask when creating/overwriting folders in backup (caution: intended to be used on initial backups; could cause data loss on existing backup data)
+- execute truenas-copy-devdconf.sh to enable auto backup when configured HDD is attached
