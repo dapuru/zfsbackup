@@ -314,28 +314,26 @@ echo "****************** $BACKUPPOOL - Cleanup ******************" >> ${BACKUPLO
 # https://pthree.org/2012/12/11/zfs-administration-part-vi-scrub-and-resilver/
 # from https://gist.github.com/petervanderdoes/bd6660302404ed5b094d
 
-# assuming external HD and long scrub-time more than one day
-scrubRawDate=$(zpool status $BACKUPPOOL | grep "scan:" | grep "scrub" | rev | cut -f1-5 -d ' ' | rev | awk '{print $4 $1 $2}')
-echo $scrubRawDate
+# assuming external HD and long scrub-time more than one day (two versions)
+scrubRawDate1=$(zpool status $BACKUPPOOL | grep "scan:" | grep "scrub" | rev | cut -f1-5 -d ' ' | rev | awk '{print $4 $1 $2}')
+scrubRawDate2=$(zpool status $BACKUPPOOL | grep "scan:" | grep "scrub" | rev | cut -f1-5 -d ' ' | rev | awk '{print $5 $2 $3}')
+echo "scrubRawDate is ${scrubRawDate1} or ${scrubRawDate2}"
 
 re='^[0-9]+[A-Z]{1}[a-z]{1,3}[0-9]{1,2}$' # check format like 2021Feb7
-if (echo "$scrubRawDate" | grep -Eq "$re"); then
-	scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
-	scrubDiff=$(($currentDate-$scrubDate))
-	scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
-	# echo $scrubShow
+if (echo "$scrubRawDate1" | grep -Eq "$re"); then
+	scrubRawDate="$scrubRawDate1"
+elif (echo "$scrubRawDate2" | grep -Eq "$re"); then
+	scrubRawDate="$scrubRawDate2"
 else
-   echo "Wrong Date - Assuming shorter scrub-time"
-   scrubRawDate=$(echo "$ZPOOLSTATUS" | grep "scan:" | grep "scrub" | rev | cut -f1-4 -d ' ' | rev | awk '{print $4 $1 $2}')
-	echo $scrubRawDate
-
-	if (echo "$scrubRawDate" | grep -Eq "$re"); then
-        scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
-        scrubDiff=$(($currentDate-$scrubDate))
-        scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
-   else
-		echo "ERROR: Scrub raw date $scrubRawDate is formatted wrong. Try running manual scrub first." >> ${BACKUPLOG} 
-	fi
+	scrubRawDate=
+fi
+if [[ $scrubRawDate ]];
+	then
+		scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
+		scrubDiff=$(($currentDate-$scrubDate))
+		scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
+else
+	echo "ERROR: Scrub raw dates $scrubRawDate1 and $scrubRawDate2 could not be parsed. Try running manual scrub first." >> ${BACKUPLOG} 
 fi
 
 # do the real scrub
