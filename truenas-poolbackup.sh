@@ -35,10 +35,15 @@
 
 # Get all config from file conf-truenas-poolbackup.env in same directory
 # Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
+SCRIPT_PATH="`dirname \"$0\"`"
+SCRIPT_PATH="`( cd \"$SCRIPT_PATH\" && pwd )`"
+
 set -o allexport
-source truenas-poolbackup-conf.env
+source ${SCRIPT_PATH}/truenas-poolbackup-conf.env
 set +o allexport
 
+# Exit on Error
+set -e
 
 # --------------- Check command line parameter --------------
 
@@ -91,6 +96,61 @@ subject="TrueNas - SUCC Backup to $BACKUPPOOL $TIMESTAMP"
 
 # human readable
 scrubExpireShow=$(($scrubExpire / 60 / 60 / 24)) # in days
+
+# --------------------- Email function ---------------------
+function prepareMailContent(){
+	mailSubject="$1"
+	mailBody="$2"
+	printf "%s\n" "To: ${email}
+Subject: ${mailSubject}
+Mime-Version: 1.0
+Content-Type: multipart/mixed; boundary=\"$boundary\"
+--${boundary}
+Content-Type: text/html; charset=\"US-ASCII\"
+Content-Transfer-Encoding: 7bit
+Content-Disposition: inline
+<html><head></head><body><pre style=\"font-size:14px; white-space:pre\">" >> $mailfile
+
+	if [ -f "${mailBody}" ];
+		then
+		less ${BACKUPLOG} >> $mailfile
+	else
+		echo "${mailBody}" >> $mailfile
+	fi
+
+	printf "%s\n" "</pre></body></html>
+--${boundary}--" >> $mailfile
+}
+
+# --------------------- Create Backup Snapshot function ---------------------
+function initBackupSnap(){
+	# Initialize Backup
+	# Form: Pool/Dataset@Snapshot
+	NEWSNAP="$1"
+	echo "Initializing Snapshot.. $NEWSNAP" >> ${BACKUPLOG}
+	
+	# Create Snapshot (not incremental, as it's the very first snapshot)
+	# zfs snapshot: Creates sanpshot with the given names
+	# -r = recursively for all descendent datasets
+	# zfs send: Creates a stream representation of the	last snapshot argument
+	# -v = verbose
+	# zfs recv: Creates a snapshot whose contents are as specified in the stream provided on standard input.
+	# s the pipe sends the snapshot from TrueNas to the Backup-Pool (initial, thats why no additional naming)
+	# -F = Force a rollback of the file system to	the most recent snapshot before performing	the receive operation.
+	
+	# Create Snapshot (on TrueNas, should show up in .zfs/snapshot subfolder of DataSet)
+	zfs snapshot -r $NEWSNAP >> ${BACKUPLOG} 
+	zfs send -v $NEWSNAP | zfs recv -F "${BACKUPPOOL}/${DATASET}"
+}
+
+
+# --------------------- Notification email ---------------------
+if [ $notification_onstart -eq 1 ];
+	then
+		prepareMailContent "TrueNas - START Backup to $BACKUPPOOL $TIMESTAMP" "Start notification of backup script $0"
+		sendmail -t -oi < ${mailfile}
+		rm ${mailfile} # important, otherwiese emails are sent all over again
+fi
 
 # ########################################################################
 # ####################### LOGIC starts here ##############################
@@ -159,12 +219,13 @@ fi
 zpool status $BACKUPPOOL >> ${BACKUPLOG}
 
 # Check if one of the pools has problems
-#condition=$(zpool status | egrep -i '(DEGRADED|FAULTED|OFFLINE|UNAVAIL|REMOVED|FAIL|DESTROYED|corrupt|cannot|unrecover)') # https://github.com/dapuru/zfsbackup/issues/5
+set +e
 condition=$(zpool status | egrep -i '(DEGRADED|FAULTED|OFFLINE|UNAVAIL|REMOVED|FAIL|DESTROYED|corrupt|cannot|unrecover)' | grep -v "features are unavailable")
 if [ "${condition}" ]; then
   problems=1
   subject="TrueNas - ERR Backup to $BACKUPPOOL $TIMESTAMP"
 fi
+set -e
 
 KEEPOLD=$(($KEEPOLD + 1))
 
@@ -186,10 +247,11 @@ do
     # -o name = Display dataset name
     # Snapshot name: ${BACKUPPOOL}/${DATASET}
     
-	recentBSnap=$(zfs list -rt snap -H -o name "${BACKUPPOOL}/${DATASET}" | grep "@${PREFIX}-" | tail -1 | cut -d@ -f2)
+	recentBSnap=$(zfs list -rt snap -H -o name "${BACKUPPOOL}/${DATASET}" | grep "${DATASET}@${PREFIX}-" | tail -1 | cut -d@ -f2)
 	if [ -z "$recentBSnap" ] 
 		then
 			echo "ERROR - No snapshot found..." >> ${BACKUPLOG}
+			set +e
 			if [ ! $yes_all -eq 1 ];
 				then
 					dialog --title "No snapshot found" --yesno "There is no backup-snapshot in ${BACKUPPOOL}/${DATASET}. Should a new backup be created? (Existing data in ${BACKUPPOOL}/${DATASET} will be overwritten.)" 15 60
@@ -197,35 +259,42 @@ do
 			else
 				ANTWORT="0"
 			fi
+			set -e
 			if [ "$ANTWORT" -eq "0" ]
 				then
 					# Initialize Backup
-					# Form: Pool/Dataset@Snapshot
 					NEWSNAP="${MASTERPOOL}/${DATASET}@${PREFIX}-$(date '+%Y%m%d-%H%M%S')"
-					echo "Initializing Snapshot.. $NEWSNAP" >> ${BACKUPLOG}
-					
-					# Create Snapshot (not incremental, as it's the very first snapshot)
-					# zfs snapshot: Creates sanpshot with the given names
-					# -r = recursively for all descendent datasets
-					# zfs send: Creates a stream representation of the	last snapshot argument
-					# -v = verbose
-					# zfs recv: Creates a snapshot whose contents are as specified in the stream provided on standard input.
-					# s the pipe sends the snapshot from TrueNas to the Backup-Pool (initial, thats why no additional naming)
-					# -F = Force a rollback of the file system to	the most recent snapshot before performing	the receive operation.
-					
-					# Create Snapshot (on TrueNas, should show up in .zfs/snapshot subfolder of DataSet)
-					zfs snapshot -r $NEWSNAP >> ${BACKUPLOG} 
-					zfs send -v $NEWSNAP | zfs recv -F "${BACKUPPOOL}/${DATASET}"
+					initBackupSnap "$NEWSNAP"
 			fi
 			continue
 	fi
 	
 	# Check if corresponding snapshot does exist in Master-Pool
-	origBSnap=$(zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep $recentBSnap | cut -d@ -f2)
+	origBSnap=$(zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep "${DATASET}@${recentBSnap}" | cut -d@ -f2)
 	if [ "$recentBSnap" != "$origBSnap" ]
 		then
+			#TODO: Do sth. against it ! (Pick another Snap, create an intermediate one, ask user ...) - Issue #10
 			echo "Error: For the last backup snaphot ${recentBSnap} there is no corresponding snapshot in the master-pool." >> ${BACKUPLOG}
+			echo "Error: $recentBSnap != $origBSnap" >> ${BACKUPLOG}
 			subject="TrueNas - ERR Backup to $BACKUPPOOL $TIMESTAMP"
+			set +e
+			if [ ! $yes_all -eq 1 ];
+				then
+					dialog --title "Backup Snapshot not found in Master" --yesno "The last Backup Snapshot $recentBSnap was not found on Master in ${BACKUPPOOL}/${DATASET} anymore. You could delete the whole dataset in Backup and recreate it from Master. Delete this Dataset and all of its childs and Snapshots?" 15 60
+					ANTWORT=${?}
+			else
+				ANTWORT="0"
+			fi
+			set -e
+			if [ "$ANTWORT" -eq "0" ]
+				then
+				# Delete complete Dataset
+				echo "Deleting Backup Dataset.. ${DATASET}" >> ${BACKUPLOG}
+				zfs destroy -R ${BACKUPPOOL}/${DATASET}
+				# Initialize Backup
+				NEWSNAP="${MASTERPOOL}/${DATASET}@${PREFIX}-$(date '+%Y%m%d-%H%M%S')"
+				initBackupSnap "$NEWSNAP"
+			fi
 			continue
 	fi
 	
@@ -238,13 +307,13 @@ do
 	echo "new snapshot created: ${NEWSNAP}" >> ${BACKUPLOG}
 	
 	# send new snapshot
-	# zfs send: Creates a stream representation of the	last snapshot argument
+	# zfs send: Creates a stream representation of the last snapshot argument
 	# -v = verbose
 	# -i = incremental (The incremental source must be an earlier snapshot in	the destination's history.  It
 	#			will commonly be an earlier snapshot in the destination's filesystem
 	# -F force, needed when target has been modified, this could even be the case, when just accessing the files in the Backup-Pool (atime)
 	#			see: https://www.kernel-error.de/kernel-error-blog/372-zfs-send-recv-schlaegt-mit-cannot-receive-incremental-stream-destination-has-been-modified-fehl
-	zfs send -v -i $recentBSnap $NEWSNAP | zfs recv -F "${BACKUPPOOL}/${DATASET}" >> ${BACKUPLOG}
+	zfs send -v -i @$recentBSnap $NEWSNAP | zfs recv -F "${BACKUPPOOL}/${DATASET}" >> ${BACKUPLOG}
 	echo "Send: $NEWSNAP to ${BACKUPPOOL}/${DATASET}" >> ${BACKUPLOG}
 	
 	# delete old snapshots
@@ -272,28 +341,26 @@ echo "****************** $BACKUPPOOL - Cleanup ******************" >> ${BACKUPLO
 # https://pthree.org/2012/12/11/zfs-administration-part-vi-scrub-and-resilver/
 # from https://gist.github.com/petervanderdoes/bd6660302404ed5b094d
 
-# assuming external HD and long scrub-time more than one day
-scrubRawDate=$(zpool status $BACKUPPOOL | grep "scan:" | grep "scrub" | rev | cut -f1-5 -d ' ' | rev | awk '{print $4 $1 $2}')
-echo $scrubRawDate
+# assuming external HD and long scrub-time more than one day (two versions)
+scrubRawDate1=$(zpool status $BACKUPPOOL | grep "scan:" | grep "scrub" | rev | cut -f1-5 -d ' ' | rev | awk '{print $4 $1 $2}')
+scrubRawDate2=$(zpool status $BACKUPPOOL | grep "scan:" | grep "scrub" | rev | cut -f1-5 -d ' ' | rev | awk '{print $5 $2 $3}')
+echo "scrubRawDate is ${scrubRawDate1} or ${scrubRawDate2}"
 
 re='^[0-9]+[A-Z]{1}[a-z]{1,3}[0-9]{1,2}$' # check format like 2021Feb7
-if (echo "$scrubRawDate" | grep -Eq "$re"); then
-	scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
-	scrubDiff=$(($currentDate-$scrubDate))
-	scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
-	# echo $scrubShow
+if (echo "$scrubRawDate1" | grep -Eq "$re"); then
+	scrubRawDate="$scrubRawDate1"
+elif (echo "$scrubRawDate2" | grep -Eq "$re"); then
+	scrubRawDate="$scrubRawDate2"
 else
-   echo "Wrong Date - Assuming shorter scrub-time"
-   scrubRawDate=$(echo "$ZPOOLSTATUS" | grep "scan:" | grep "scrub" | rev | cut -f1-4 -d ' ' | rev | awk '{print $4 $1 $2}')
-	echo $scrubRawDate
-
-	if (echo "$scrubRawDate" | grep -Eq "$re"); then
-        scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
-        scrubDiff=$(($currentDate-$scrubDate))
-        scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
-   else
-		echo "ERROR: Scrub raw date $scrubRawDate is formatted wrong. Try running manual scrub first." >> ${BACKUPLOG} 
-	fi
+	scrubRawDate=
+fi
+if [[ $scrubRawDate ]];
+	then
+		scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
+		scrubDiff=$(($currentDate-$scrubDate))
+		scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
+else
+	echo "ERROR: Scrub raw dates $scrubRawDate1 and $scrubRawDate2 could not be parsed. Try running manual scrub first." >> ${BACKUPLOG} 
 fi
 
 # do the real scrub
@@ -343,25 +410,11 @@ fi # Only contiune if pool are in good shape
 # ##################################################################
 # ####################### Send Email  ##############################
 
-printf "%s\n" "To: ${email}
-Subject: ${subject}
-Mime-Version: 1.0
-Content-Type: multipart/mixed; boundary=\"$boundary\"
---${boundary}
-Content-Type: text/html; charset=\"US-ASCII\"
-Content-Transfer-Encoding: 7bit
-Content-Disposition: inline
-<html><head></head><body><pre style=\"font-size:14px; white-space:pre\">" >> $mailfile
-
-less ${BACKUPLOG} >> $mailfile
-
-printf "%s\n" "</pre></body></html>
---${boundary}--" >> $mailfile
-
 ### Send report ###
 if [ -z "${email}" ]; then
-  echo "No email address specified, information available in ${mailfile}"
-else
-  sendmail -t -oi < ${mailfile}
-  rm ${mailfile} # important, otherwiese emails are sent all over again
+	echo "No email address specified, information available in ${mailfile}"
+elif [ $notification_onend -eq 1 ]; then
+	prepareMailContent "${subject}" ${BACKUPLOG}
+	sendmail -t -oi < ${mailfile}
+	rm ${mailfile} # important, otherwiese emails are sent all over again
 fi

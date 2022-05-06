@@ -17,5 +17,5 @@ The script is automatically triggered, when the backup-HDD is attached to the Tr
   - -h show help
   - -f force scrub (even if the condition, number of passed days) is not met
   - -d dry run (do not do the actual backup)
-  - -y don't ask when creating/overwriting folders in backup (caution: intended to be used on initial backups; could cause data loss on existing backup data)
+  - -y don't ask when creating/overwriting/deleting folders in backup (caution: intended to be used on initial backups; could cause data loss on existing backup data)
 - execute truenas-copy-devdconf.sh to enable auto backup when configured HDD is attached
