@@ -122,6 +122,27 @@ Content-Disposition: inline
 --${boundary}--" >> $mailfile
 }
 
+# --------------------- Create Backup Snapshot function ---------------------
+function initBackupSnap(){
+	# Initialize Backup
+	# Form: Pool/Dataset@Snapshot
+	NEWSNAP="$1"
+	echo "Initializing Snapshot.. $NEWSNAP" >> ${BACKUPLOG}
+	
+	# Create Snapshot (not incremental, as it's the very first snapshot)
+	# zfs snapshot: Creates sanpshot with the given names
+	# -r = recursively for all descendent datasets
+	# zfs send: Creates a stream representation of the	last snapshot argument
+	# -v = verbose
+	# zfs recv: Creates a snapshot whose contents are as specified in the stream provided on standard input.
+	# s the pipe sends the snapshot from TrueNas to the Backup-Pool (initial, thats why no additional naming)
+	# -F = Force a rollback of the file system to	the most recent snapshot before performing	the receive operation.
+	
+	# Create Snapshot (on TrueNas, should show up in .zfs/snapshot subfolder of DataSet)
+	zfs snapshot -r $NEWSNAP >> ${BACKUPLOG} 
+	zfs send -v $NEWSNAP | zfs recv -F "${BACKUPPOOL}/${DATASET}"
+}
+
 
 # --------------------- Notification email ---------------------
 if [ $notification_onstart -eq 1 ];
@@ -230,6 +251,7 @@ do
 	if [ -z "$recentBSnap" ] 
 		then
 			echo "ERROR - No snapshot found..." >> ${BACKUPLOG}
+			set +e
 			if [ ! $yes_all -eq 1 ];
 				then
 					dialog --title "No snapshot found" --yesno "There is no backup-snapshot in ${BACKUPPOOL}/${DATASET}. Should a new backup be created? (Existing data in ${BACKUPPOOL}/${DATASET} will be overwritten.)" 15 60
@@ -237,25 +259,12 @@ do
 			else
 				ANTWORT="0"
 			fi
+			set -e
 			if [ "$ANTWORT" -eq "0" ]
 				then
 					# Initialize Backup
-					# Form: Pool/Dataset@Snapshot
 					NEWSNAP="${MASTERPOOL}/${DATASET}@${PREFIX}-$(date '+%Y%m%d-%H%M%S')"
-					echo "Initializing Snapshot.. $NEWSNAP" >> ${BACKUPLOG}
-					
-					# Create Snapshot (not incremental, as it's the very first snapshot)
-					# zfs snapshot: Creates sanpshot with the given names
-					# -r = recursively for all descendent datasets
-					# zfs send: Creates a stream representation of the	last snapshot argument
-					# -v = verbose
-					# zfs recv: Creates a snapshot whose contents are as specified in the stream provided on standard input.
-					# s the pipe sends the snapshot from TrueNas to the Backup-Pool (initial, thats why no additional naming)
-					# -F = Force a rollback of the file system to	the most recent snapshot before performing	the receive operation.
-					
-					# Create Snapshot (on TrueNas, should show up in .zfs/snapshot subfolder of DataSet)
-					zfs snapshot -r $NEWSNAP >> ${BACKUPLOG} 
-					zfs send -v $NEWSNAP | zfs recv -F "${BACKUPPOOL}/${DATASET}"
+					initBackupSnap "$NEWSNAP"
 			fi
 			continue
 	fi
@@ -268,6 +277,24 @@ do
 			echo "Error: For the last backup snaphot ${recentBSnap} there is no corresponding snapshot in the master-pool." >> ${BACKUPLOG}
 			echo "Error: $recentBSnap != $origBSnap" >> ${BACKUPLOG}
 			subject="TrueNas - ERR Backup to $BACKUPPOOL $TIMESTAMP"
+			set +e
+			if [ ! $yes_all -eq 1 ];
+				then
+					dialog --title "Backup Snapshot not found in Master" --yesno "The last Backup Snapshot $recentBSnap was not found on Master in ${BACKUPPOOL}/${DATASET} anymore. You could delete the whole dataset in Backup and recreate it from Master. Delete this Dataset and all of its childs and Snapshots?" 15 60
+					ANTWORT=${?}
+			else
+				ANTWORT="0"
+			fi
+			set -e
+			if [ "$ANTWORT" -eq "0" ]
+				then
+				# Delete complete Dataset
+				echo "Deleting Backup Dataset.. ${DATASET}" >> ${BACKUPLOG}
+				zfs destroy -R ${BACKUPPOOL}/${DATASET}
+				# Initialize Backup
+				NEWSNAP="${MASTERPOOL}/${DATASET}@${PREFIX}-$(date '+%Y%m%d-%H%M%S')"
+				initBackupSnap "$NEWSNAP"
+			fi
 			continue
 	fi
 	
