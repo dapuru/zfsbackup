@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Backup of TrueNas Pools to external HardDisk
-# This will backup the DATA in TrueNAS
+# This will backup the DATA in TrueNAS or any zfs-Pool on a Linux maschine.
+# So potentially TrueNas Scale (untested, zfs-tweaks still needed) tba.
 #
 # Author: dapuru (https://github.com/dapuru/zfsbackup/)
 # based on the script by Jörg Binnewald
@@ -17,23 +18,14 @@
 # configuration in: devd-backuphdd.conf
 # see: https://www.freebsd.org/cgi/man.cgi?devd.conf
 #
-# Version: 0.6.1
-# Date: 03.04.2022
+# Version: 0.7
+# Date: 28.08.2022
 # Initially Published: 05.06.2021
-#
-# Modifications:
-# Support for encrypted Backup-Pool using load-key
-# All Live Data-Sets and Sub-DataSets
-# Scrub for Backup-Pool
-# Email-Notification
-# Cleansing #here
-# .env-file for config
-# Regex for Scrub-Date & Command line parameter for Dry-run (-d) and forced scrub (-f)
 #
 # #####################################################################
 # ####################### Config## ####################################
 
-# Get all config from file conf-truenas-poolbackup.env in same directory
+# Get all config from file truenas-poolbackup-conf.env in same directory
 # Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
 SCRIPT_PATH="`dirname \"$0\"`"
 SCRIPT_PATH="`( cd \"$SCRIPT_PATH\" && pwd )`"
@@ -41,6 +33,17 @@ SCRIPT_PATH="`( cd \"$SCRIPT_PATH\" && pwd )`"
 set -o allexport
 source ${SCRIPT_PATH}/truenas-poolbackup-conf.env
 set +o allexport
+
+#!! add FreeBSD vs. Linux compatibility tweaks
+platform='unknown'
+unamestr=$(uname)
+if [ "$unamestr" = 'Linux' ]; then
+   platform='linux'
+   reverse_order='tac'
+elif [ "$unamestr" = 'FreeBSD' ]; then
+   platform='freebsd'
+   reverse_order='tail -r' 
+fi
 
 # Exit on Error
 set -e
@@ -90,7 +93,7 @@ scrubExpire=2592000
 
 # Init variables
 problems=0
-freenashost=$(hostname -s | tr '[:lower:]' '[:upper:]')
+nashost=$(hostname -s | tr '[:lower:]' '[:upper:]')
 mailfile="/tmp/backup_email.tmp"
 subject="TrueNas - SUCC Backup to $BACKUPPOOL $TIMESTAMP"
 
@@ -111,8 +114,7 @@ Content-Transfer-Encoding: 7bit
 Content-Disposition: inline
 <html><head></head><body><pre style=\"font-size:14px; white-space:pre\">" >> $mailfile
 
-	if [ -f "${mailBody}" ];
-		then
+	if [ -f "${mailBody}" ]; then
 		less ${BACKUPLOG} >> $mailfile
 	else
 		echo "${mailBody}" >> $mailfile
@@ -169,11 +171,30 @@ do
         readarray -t <<<$tmp_sub #MAPFILE is default array
 
 # add all sub-datasets to main array
-for (( i=1; i<${#MAPFILE[@]}; i++ ))
-do
-#    echo "$i: ${MAPFILE[$i]}"
-    DATASETS=("${DATASETS[@]}" ${MAPFILE[i]})
-done
+if [ "$platform" = 'linux' ]; then
+	#!! Linux - TrueNas Scale and my local pc
+	# Bash index stars at 0, zsh at 1 - i'm using zsh... so sorry, feel free to tweak
+	# currently can't set parameter KSH_ARRAYS https://zsh.sourceforge.io/Doc/Release/Options.html#Shell-Emulation
+	for (( i=0; i<${#MAPFILE[@]}; i++ ))
+	do
+    	echo "$i: ${MAPFILE[$i]}"
+    	# Test if entry is already in the array
+    	[[ " ${DATASETS[*]} " =~ " ${MAPFILE[$i]} " ]] && echo "Already in array" || DATASETS=("${DATASETS[@]}" ${MAPFILE[i]})
+    	#DATASETS=("${DATASETS[@]}" ${MAPFILE[i]})
+	done
+
+elif [ "$platform" = 'freebsd' ]; then
+	# FreeBSD - TrueNAS
+	for (( i=1; i<${#MAPFILE[@]}; i++ ))
+	do
+		# echo "$i: ${MAPFILE[$i]}"
+    	DATASETS=("${DATASETS[@]}" ${MAPFILE[i]})
+	done
+else
+	echo "unknown platform. Exiting..."
+	exit 0
+fi
+
 done
 
 
@@ -182,7 +203,7 @@ if [ $dry_run -eq 1 ]; then
  echo "########## DRYRUN ##########" >> ${BACKUPLOG}
  echo "########## DRYRUN ##########"
 fi
- echo "########## Backup of pools on server ${freenashost} ##########" >> ${BACKUPLOG}
+ echo "########## Backup of pools on ${nashost} ##########" >> ${BACKUPLOG}
  echo "Started Backup-job: $TIMESTAMP" >> ${BACKUPLOG}
 
 (
@@ -321,11 +342,13 @@ do
 	# -r = recursively, all children
 	echo "Destroying Snapshots:" >> ${BACKUPLOG}
 	#Log
-	zfs list -rt snap -H -o name "${BACKUPPOOL}/${DATASET}" | grep "${BACKUPPOOL}/${DATASET}@${PREFIX}-" | tail -r | tail +$KEEPOLD >> ${BACKUPLOG}
-	zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep "${MASTERPOOL}/${DATASET}@${PREFIX}-" | tail -r | tail +$KEEPOLD >> ${BACKUPLOG}
+	#!! on Linux use tac instead of tail -r for reverse order
+	#!! https://lists.freebsd.org/pipermail/freebsd-questions/2004-February/036866.html
+	zfs list -rt snap -H -o name "${BACKUPPOOL}/${DATASET}" | grep "${BACKUPPOOL}/${DATASET}@${PREFIX}-" | $reverse_order | tail +$KEEPOLD >> ${BACKUPLOG}
+	zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep "${MASTERPOOL}/${DATASET}@${PREFIX}-" | $reverse_order | tail +$KEEPOLD >> ${BACKUPLOG}
 	#Destroy
-	zfs list -rt snap -H -o name "${BACKUPPOOL}/${DATASET}" | grep "${BACKUPPOOL}/${DATASET}@${PREFIX}-" | tail -r | tail +$KEEPOLD | xargs -n 1 zfs destroy #-r 
-	zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep "${MASTERPOOL}/${DATASET}@${PREFIX}-" | tail -r | tail +$KEEPOLD | xargs -n 1 zfs destroy #-r
+	zfs list -rt snap -H -o name "${BACKUPPOOL}/${DATASET}" | grep "${BACKUPPOOL}/${DATASET}@${PREFIX}-" | $reverse_order | tail +$KEEPOLD | xargs -n 1 zfs destroy #-r 
+	zfs list -rt snap -H -o name "${MASTERPOOL}/${DATASET}" | grep "${MASTERPOOL}/${DATASET}@${PREFIX}-" | $reverse_order | tail +$KEEPOLD | xargs -n 1 zfs destroy #-r
  
 done
 fi # not in dry-run
@@ -356,7 +379,20 @@ else
 fi
 if [[ $scrubRawDate ]];
 	then
-		scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
+		
+		#!! date -j doesn't exit in Linux
+		if [ "$platform" = 'linux' ]; then
+			# from this 2022Auf27 to that 27Aug2022
+			scrubWorkDate=${scrubRawDate:7:2}${scrubRawDate:4:3}${scrubRawDate:0:4}
+			# scrubDate=$(date --date="$(printf $scrubWorkDate)" +"%Y-%m-%d-%H%M%S")
+			scrubDate=$(date --date="$(printf $scrubWorkDate)" +"%s")
+		elif [ "$platform" = 'freebsd' ]; then
+			scrubDate=$(date -j -f '%Y%b%e-%H%M%S' $scrubRawDate'-000000' +%s)
+		else
+			echo "unknown platform. Exiting..."
+			exit 0
+		fi
+
 		scrubDiff=$(($currentDate-$scrubDate))
 		scrubShow=$(($scrubDiff / 60 / 60 / 24)) # in days
 else
