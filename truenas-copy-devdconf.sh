@@ -3,8 +3,13 @@
 set -e
 
 # Copy devd-Config files from root-scripts folder to
-# in /usr/local/etc/devd/ , as files thered don't survive a reboot
+# in /usr/local/etc/devd/ , as files there don't survive a reboot
 # so copy it to /usr/local/etc/devd/ with cronjob and this script
+
+##################################################################
+# This script is for FreeBSD and the devd-Rules
+# For Linux use the script truenas-copy-udevconf.sh
+##################################################################
 
 force_copy=0
 
