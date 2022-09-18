@@ -10,6 +10,8 @@ Mandatory:
 - Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
 - devd-backuphdd.conf (devd rule, connecting HDD)
 - truenas-copy-devdconf.sh (Workaround, because TrueNas keeps killing the devd rule)
+
+<br>
 Optional:
 - Folder "restore" (scripts to mount and unmount the backup HDD on a linux maschine; not needed if you use the script for TrueNas)
 - Folder "homebackup" (helper scripts to run in my local Linux maschine to backup the home folder; not needed if you use the script for TrueNas)
