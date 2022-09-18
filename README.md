@@ -13,8 +13,8 @@ Mandatory:
 
 <br>
 Optional:
-- Folder "restore" (scripts to mount and unmount the backup HDD on a linux maschine; not needed if you use the script for TrueNas)
-- Folder "homebackup" (helper scripts to run in my local Linux maschine to backup the home folder; not needed if you use the script for TrueNas)
+- Folder "restore" (scripts to mount and unmount the backup HDD on a linux maschine; not needed if you use the script for TrueNas) <br>
+- Folder "homebackup" (helper scripts to run in my local Linux maschine to backup the home folder; not needed if you use the script for TrueNas) <br>
 
 ## Usage
 - configure the devd-rule, and change the config in truenas-poolbackup-conf.env to suit your needs
