@@ -18,21 +18,71 @@
 # configuration in: devd-backuphdd.conf
 # see: https://www.freebsd.org/cgi/man.cgi?devd.conf
 #
-# Version: 0.7
-# Date: 28.08.2022
+# Version: 0.8
+# Date: 18.09.2022
 # Initially Published: 05.06.2021
 #
 # #####################################################################
-# ####################### Config## ####################################
+
+# --------------- Check command line parameter --------------
+
+dry_run=0
+force_scrub=0
+yes_all=0
+config_file=""
+
+while getopts "hdfyc:" opt; do
+	case $opt in
+		d)	dry_run=1
+		;;
+		f)	force_scrub=1
+		;;
+		y)	yes_all=1
+		;;
+		c)	config_file=${OPTARG}
+		;;
+		h) echo "run poolbackup using zfs. Config file in truenas-poolbackup-conf.env or specify via -c"
+	 	  	echo 'usage: truenas-poolbackup [-dfhcy]'
+	    	echo "Options: -d dryrun (no backup done)"
+	    	echo "         -f force scrub (even condition is not met)"
+	 		echo "         -h print this help and exit"
+	 		echo "	       -c specify non-standard config-file"
+	 		echo "         -y don't ask when creating/overwriting folders in backup"
+			echo "            (caution: intended to be used on initial backups)"
+			exit 0 ;;
+	esac
+done
+
+# -------------------------- Config -----------------------
 
 # Get all config from file truenas-poolbackup-conf.env in same directory
 # Example file "truenas-poolbackup-conf-example.env" provided - rename to truenas-poolbackup-conf.env
+# in case parameter -c is provided, use the config-file specified as parameter
 SCRIPT_PATH="`dirname \"$0\"`"
 SCRIPT_PATH="`( cd \"$SCRIPT_PATH\" && pwd )`"
 
+echo "${config_file}"
+
+# specify config file
+if [ "$config_file" == "" ];
+	then
+		CONFIG_PATH=${SCRIPT_PATH}/truenas-poolbackup-conf.env
+	else
+		CONFIG_PATH=$config_file
+fi
+
+if [ -f "$CONFIG_PATH" ]; then
+    echo "Using config file $CONFIG_PATH"
+else 
+    echo "Config file $CONFIG_PATH does not exist. Aborting..."
+    exit
+fi
+
+# Read config file
 set -o allexport
-source ${SCRIPT_PATH}/truenas-poolbackup-conf.env
+source ${CONFIG_PATH}
 set +o allexport
+		
 
 #!! add FreeBSD vs. Linux compatibility tweaks
 platform='unknown'
@@ -44,34 +94,10 @@ elif [ "$unamestr" = 'FreeBSD' ]; then
    platform='freebsd'
    reverse_order='tail -r' 
 fi
+echo "Running on $platform" >> ${BACKUPLOG}
 
 # Exit on Error
 set -e
-
-# --------------- Check command line parameter --------------
-
-dry_run=0
-force_scrub=0
-yes_all=0
-
-while getopts "hdfy" opt; do
-	case $opt in
-		d)	dry_run=1
-		;;
-		f)	force_scrub=1
-		;;
-		y)	yes_all=1
-		;;
-		h) echo "run poolbackup using zfs. Config file in truenas-poolbackup-conf.env"
-	 	  	echo 'usage: truenas-poolbackup [-dfhy]'
-	    	echo "Options: -d dryrun (no backup done)"
-	    	echo "         -f force scrub (even condition is not met)"
-	 		echo "         -h print this help and exit"
-	 		echo "         -y don't ask when creating/overwriting folders in backup"
-			echo "            (caution: intended to be used on initial backups)"
-			exit 0 ;;
-	esac
-done
 
 # --------------- wait to be able to kill process  --------------
 secs=0
@@ -340,7 +366,7 @@ do
 	# delete old snapshots
 	# zfs destroy: The given snapshot is destroyed
 	# -r = recursively, all children
-	echo "Destroying Snapshots:" >> ${BACKUPLOG}
+	echo "Destroying Snapshots for ${DATASET}:" >> ${BACKUPLOG}
 	#Log
 	#!! on Linux use tac instead of tail -r for reverse order
 	#!! https://lists.freebsd.org/pipermail/freebsd-questions/2004-February/036866.html
