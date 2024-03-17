@@ -349,7 +349,8 @@ do
 	
 	# Name for new Snapshot
 	NEWSNAP="${MASTERPOOL}/${DATASET}@${PREFIX}-$(date '+%Y%m%d-%H%M%S')"
-	# create new snapshot
+	# create new snapshot; Bug #16
+ 	sleep 2
 	zfs snapshot -r $NEWSNAP
 	echo "new snapshot created: ${NEWSNAP}" >> ${BACKUPLOG}
 	
